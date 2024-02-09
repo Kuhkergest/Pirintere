@@ -12,26 +12,26 @@ def move_to_start():
 
 
 def make_dot():
-    set_angle(90)
-    set_angle(45)
+    set_angle(120)
+    set_angle(80)
 
 
 def set_angle(angle):
     duty = angle/18+2
     output(servo_pin, True)
     servo_pwm.ChangeDutyCycle(duty)
-    sleep(0.1)
+    sleep(0.3)
     output(servo_pin, False)
     servo_pwm.ChangeDutyCycle(0)
 
     
-def move_roller_dist(dist, direction=True, radius=8):
-    n_steps = round(1600*dist/math.pi/radius)
+def move_roller_dist(d, direction=True, r=6.35, R=7, D=312.7):
+    n_steps = 2222/math.pi/r*(((d**2)/((R-r)**2))/(D**2)+d**2)**(1/2)
     move_roller_steps(n_steps, direction)
 
         
-def move_tube_dist(dist, direction=True, radius=7):
-    n_steps = round(1600*dist/math.pi/radius)
+def move_tube_dist(d, direction=True, r=6.35):
+    n_steps = 2000*d/math.pi/r
     move_tube_steps(n_steps, direction)
 
 
@@ -98,21 +98,23 @@ d = {
     'ю': np.array([[1, 0], [1, 1], [0, 1]]),
     'я': np.array([[1, 1], [1, 0], [0, 1]]),
 }
-max_chars = 39
-horizontal_letter_dist = 25
-horizontal_word_dist = 35
-vertical_letter_dist = 25
-vertical_word_dist = 50
+max_chars = 32
+horizontal_letter_dist = 2.5
+horizontal_word_dist = 3.5
+vertical_letter_dist = 2.5
+vertical_word_dist = 5.0
 
 
-roller_dir_pin = 23
-roller_step_pin = 12
-tube_dir_pin = 17
-tube_step_pin = 13
-servo_pin = 24
+roller_dir_pin = 26
+roller_step_pin = 20
+tube_dir_pin = 19
+tube_step_pin = 16
+servo_pin = 17
+buz_pin = 3
 motor_frequency = 2000
 servo_frequency = 50
-forward_dir = True
+buz_frequency = 440
+forward_dir = False
 
 setmode(BCM)
 
@@ -121,10 +123,12 @@ setup(tube_dir_pin, OUT)
 setup(roller_step_pin, OUT)
 setup(roller_dir_pin, OUT)
 setup(servo_pin, OUT)
+setup(buz_pin, OUT)
 
 roller_pwm = PWM(roller_step_pin, motor_frequency)
 tube_pwm = PWM(tube_step_pin, motor_frequency)
 servo_pwm = PWM(servo_pin, servo_frequency)
+buz_pwm = PWM(buz_pin, buz_frequency)
 
 model = Model('./vosk-model-small-ru-0.22')
 recognizer = KaldiRecognizer(model, 16000)
@@ -134,12 +138,14 @@ stream = mic.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, fr
 roller_pwm.start(0)
 tube_pwm.start(0)
 servo_pwm.start(0)
+buz_pwm.start(0)
 stream.start_stream()
 
 
 started = False
-start_word = 'старт'
-end_word = 'стоп'
+start_word = 'начало'
+end_word = 'конец'
+clean_word = 'очистить'
 sentences = []
 while True:
     data = stream.read(4096)
@@ -147,13 +153,27 @@ while True:
         text = recognizer.Result()
         text = text[14:-3]
         print(f"Text: |{text}|")
+        if clean_word == text:
+            sentences = []
+            print('Sentences reset')
+            continue
         start_i = text.find(start_word)
         if start_i >= 0 and not started:
             sentences = []
             started = True
             text = text[start_i+len(start_word):]
+            buz_pwm.ChangeDutyCycle(50)
+            sleep(0.5)
+            buz_pwm.ChangeDutyCycle(0)
         stop_i = text.find(end_word)
         if stop_i >= 0 and started:
+            buz_pwm.ChangeDutyCycle(50)
+            sleep(0.5)
+            buz_pwm.ChangeDutyCycle(0)
+            sleep(0.5)
+            buz_pwm.ChangeDutyCycle(50)
+            sleep(0.5)
+            buz_pwm.ChangeDutyCycle(0)
             text = text[:stop_i]
             sentences.append(text)
             move_to_start()
@@ -171,8 +191,6 @@ while True:
             dist = 0
             for phrase in queue:
                 for row in phrase:
-                    move_roller_dist(dist, direction=not forward_dir)
-                    dist = 0
                     for letter in row:
                         for dot in letter:
                             if dot == 1:
@@ -184,6 +202,9 @@ while True:
                         move_roller_dist(horizontal_word_dist - horizontal_letter_dist, direction=forward_dir)
                         print('letter')
                     move_tube_dist(vertical_letter_dist, direction=forward_dir)
+                    print('To start,',dist)
+                    move_roller_dist(dist, direction=(not forward_dir))
+                    dist = 0
                     print('row')
                 move_tube_dist(vertical_word_dist - vertical_letter_dist, direction=forward_dir)
                 print('phrase')
@@ -194,8 +215,8 @@ while True:
             sentences.append(text)
         print('Start_idx: {0}, Stop_idx: {1}, Started: {2}'.format(start_i, stop_i, started))
 
-set_angle(45)
+set_angle(80)
 roller_pwm.stop()
 tube_pwm.stop()
 servo_pwm.stop()
-cleanup()
+buz_pwm.stop()
